@@ -7,7 +7,15 @@
 
 using namespace std;
 
-HANDLE StartPythonProcessWithConsole(const string& pythonScriptPath, bool showConsole = false) {
+struct ProcessInfo {
+    ProcessInfo(HANDLE hProcess, HANDLE hThread, HANDLE hReadPipe)
+        : hProcess(hProcess), hThread(hThread), hReadPipe(hReadPipe) {}
+    HANDLE hProcess;
+    HANDLE hThread;
+    HANDLE hReadPipe;
+};
+
+HANDLE StartPythonProcess(const string& pythonScriptPath) {
     STARTUPINFOW si = { sizeof(STARTUPINFOW) };
     PROCESS_INFORMATION pi;
     SECURITY_ATTRIBUTES sa = { sizeof(SECURITY_ATTRIBUTES), NULL, TRUE };
@@ -40,7 +48,7 @@ HANDLE StartPythonProcessWithConsole(const string& pythonScriptPath, bool showCo
             NULL,
             NULL,
             TRUE,
-            showConsole ? 0 : CREATE_NO_WINDOW,
+            0,
             NULL,
             NULL,
             &si,
@@ -57,17 +65,84 @@ HANDLE StartPythonProcessWithConsole(const string& pythonScriptPath, bool showCo
     return hReadPipe;
 }
 
+ProcessInfo StartPythonProcessWithConsole(const string& pythonScriptPath) {
+    STARTUPINFOW si = { sizeof(STARTUPINFOW) };
+    bool showConsole = true;
+    PROCESS_INFORMATION pi = { 0 };
+    SECURITY_ATTRIBUTES sa = { sizeof(SECURITY_ATTRIBUTES), NULL, TRUE };
+    HANDLE hReadPipe = NULL, hWritePipe = NULL, hWritePipeDup = NULL;
+    
+    if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0)) {
+        return ProcessInfo(NULL, NULL, NULL);
+    }
+    
+    if (!SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0)) {
+        CloseHandle(hReadPipe);
+        CloseHandle(hWritePipe);
+        return ProcessInfo(NULL, NULL, NULL);
+    }
+    
+    if (showConsole) {
+        AllocConsole();
+    
+        if (!DuplicateHandle(GetCurrentProcess(), hWritePipe, GetCurrentProcess(), &hWritePipeDup, 0, TRUE, DUPLICATE_SAME_ACCESS)) {
+            CloseHandle(hReadPipe);
+            CloseHandle(hWritePipe);
+            return ProcessInfo(NULL, NULL, NULL);
+        }
+    
+        SetStdHandle(STD_OUTPUT_HANDLE, hWritePipeDup);
+        SetStdHandle(STD_ERROR_HANDLE, hWritePipeDup);
+    } else {
+        si.dwFlags = STARTF_USESTDHANDLES;
+        si.hStdOutput = hWritePipe;
+        si.hStdError = hWritePipe;
+    }
+    
+    wstring wPythonScriptPath = wstring(pythonScriptPath.begin(), pythonScriptPath.end());
+    wstring wCommand = L"python \"" + wPythonScriptPath + L"\"";
+    
+    DWORD consoleParams = showConsole ? CREATE_NEW_CONSOLE : CREATE_NO_WINDOW | CREATE_SUSPENDED;
+    
+    if (!CreateProcessW(
+            NULL,
+            const_cast<wchar_t*>(wCommand.c_str()),
+            NULL,
+            NULL,
+            TRUE,
+            consoleParams,
+            NULL,
+            NULL,
+            &si,
+            &pi)) {
+        CloseHandle(hReadPipe);
+        CloseHandle(hWritePipe);
+        if (showConsole) CloseHandle(hWritePipeDup);
+        return ProcessInfo(NULL, NULL, NULL);
+    }
+    
+    if (showConsole) {
+        AttachConsole(pi.dwProcessId);
+    }
+    
+    ResumeThread(pi.hThread);
+    
+    CloseHandle(hWritePipe);
+    if (showConsole) CloseHandle(hWritePipeDup);
+    
+    return ProcessInfo(pi.hProcess, pi.hThread, hReadPipe);
+}
+
 string input(string prompt) {
     cout << prompt;
-    string input;
-    cin >> input;
-    return input;
+    getline(cin, prompt);
+    return prompt;
 }
 
 string findMac(string ip){
     cout << "Resolving MAC address for IP: " << ip << endl;
     const string pythonScriptPath = "./assets/get_mac.py --target_ip " + ip;
-    HANDLE hReadPipe = StartPythonProcessWithConsole(pythonScriptPath, false);
+    HANDLE hReadPipe = StartPythonProcess(pythonScriptPath);
     if (hReadPipe == NULL) {
         cout << "Failed to start Python process, while getting mac" << endl;
         return "";
@@ -76,15 +151,13 @@ string findMac(string ip){
     char buffer[128];
     DWORD bytesRead;
 
-    // Read the output from the pipe.
     while (ReadFile(hReadPipe, buffer, sizeof(buffer) - 1, &bytesRead, NULL) && bytesRead > 0) {
-        buffer[bytesRead] = '\0'; // Null-terminate the buffer.
+        buffer[bytesRead] = '\0';
         result += buffer;
     }
 
     CloseHandle(hReadPipe);
 
-    // Extract the part inside ||.
     size_t start = result.find("|");
     size_t end = result.rfind("|");
     if (start != string::npos && end != string::npos && start != end) {
@@ -103,6 +176,7 @@ struct SeshData
     string gatewayIp = "";
     string gatewayMac = "";
     string interfaceName = "";
+    ProcessInfo serverHandle = { NULL, NULL, NULL };
     void print(){
         cout << "--------Session Data--------" << endl;
         cout << "Target IP: " << targetIp << endl;
@@ -192,13 +266,11 @@ SeshData getSeshData(){
 }
 
 int InitConsole(){
-    // Allocate a console for the main process.
     if (!AllocConsole()) {
         cout << "Failed to allocate console." << endl;
         return -1;
     }
 
-    // Redirect standard input, output, and error to the console.
     FILE* fp;
     freopen_s(&fp, "CONOUT$", "w", stdout);
     freopen_s(&fp, "CONOUT$", "w", stderr);
@@ -207,16 +279,47 @@ int InitConsole(){
     return 0;
 }
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+int mainLoop(SeshData seshData, bool *run){
+    string command = input("\\\\> ");
+    if (command == "exit") {
+        *run = false;
+    }
     
+    return 0;
+}
+
+void exit(SeshData seshData){
+    input("Press ant key to exit...");
+    int num = TerminateProcess(seshData.serverHandle.hProcess, 0);
+    cout << "Terminated server process with code: " << num << endl;
+    CloseHandle(seshData.serverHandle.hThread);
+    FreeConsole();
+    ExitProcess(0);
+}
+
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    bool run = true;
     if (InitConsole() == -1) {
-        return -1;
+        exit(SeshData());
     }
 
     SeshData seshData = getSeshData();
-    string temp;
-    cin >> temp;
+    if (seshData.targetIp == "" || seshData.targetMac == "" || seshData.myIp == "" || seshData.myMac == "" || seshData.gatewayIp == "" || seshData.gatewayMac == "" || seshData.interfaceName == "") {
+        cout << "Failed to get session data." << endl;
+        exit(seshData);
+    }
+    seshData.serverHandle = StartPythonProcessWithConsole("./assets/server.py");
+    if (seshData.serverHandle.hProcess == NULL) {
+        cout << "Failed to start server." << endl;
+        exit(seshData);
+    }
 
+    while (run) {
+        mainLoop(seshData, &run);
+        Sleep(0.1);
+    }
+    
+    exit(seshData);
 
     return 0;
 }
