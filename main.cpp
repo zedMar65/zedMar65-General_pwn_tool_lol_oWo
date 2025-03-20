@@ -7,7 +7,7 @@
 
 using namespace std;
 
-HANDLE StartPythonProcessWithConsole(const string& pythonScriptPath) {
+HANDLE StartPythonProcessWithConsole(const string& pythonScriptPath, bool showConsole = false) {
     STARTUPINFOW si = { sizeof(STARTUPINFOW) };
     PROCESS_INFORMATION pi;
     SECURITY_ATTRIBUTES sa = { sizeof(SECURITY_ATTRIBUTES), NULL, TRUE };
@@ -40,7 +40,7 @@ HANDLE StartPythonProcessWithConsole(const string& pythonScriptPath) {
             NULL,
             NULL,
             TRUE,
-            0,
+            showConsole ? 0 : CREATE_NO_WINDOW,
             NULL,
             NULL,
             &si,
@@ -67,7 +67,7 @@ string input(string prompt) {
 string findMac(string ip){
     cout << "Resolving MAC address for IP: " << ip << endl;
     const string pythonScriptPath = "./assets/get_mac.py --target_ip " + ip;
-    HANDLE hReadPipe = StartPythonProcessWithConsole(pythonScriptPath);
+    HANDLE hReadPipe = StartPythonProcessWithConsole(pythonScriptPath, false);
     if (hReadPipe == NULL) {
         cout << "Failed to start Python process, while getting mac" << endl;
         return "";

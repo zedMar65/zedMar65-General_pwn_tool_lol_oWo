@@ -1,1 +1,0 @@
-python assets/cleanup.py --target_ip 192.168.1.145 --target_mac 52:db:a3:6b:f0:c4 --gateway_ip 192.168.1.1 --gateway_mac 20:b0:01:15:c3:4f --interface Wi-Fi
