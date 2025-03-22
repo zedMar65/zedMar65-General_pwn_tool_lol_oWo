@@ -4,7 +4,7 @@ import urllib.parse
 import os
 PORT = 8080
 REDIRECT_URL = "https://dienynas.tamo.lt/"
-LOG_FILE = "./requests.log"
+LOG_FILE = "./data.log"
 SELF_PATH = os.path.dirname(os.path.realpath(__file__))
 PAGE_PATH = os.path.join(SELF_PATH, "server/index.html")
 os.system("netsh advfirewall firewall add rule name=\"Allow 8080\" dir=in action=allow protocol=TCP localport=8080")

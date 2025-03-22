@@ -22,12 +22,14 @@ parser.add_argument("--target_mac", type=str, help="Target MAC address", require
 parser.add_argument("--gateway_ip", type=str, help="Gateway IP address", required=True)
 parser.add_argument("--gateway_mac", type=str, help="Gateway MAC address", required=True)
 parser.add_argument("--interface", type=str, help="Network interface name", default="Wi-Fi")
+parser.add_argument("--log", type=str, help="0/1 for log", default="0")
 args = parser.parse_args()
 
 INTERFACE = args.interface
 
 
 def main():
+    LOG_ENABLE = int(args.log)
     TARGET_IP = args.target_ip
     TARGET_MAC = args.target_mac
     GATEWAY_IP = args.gateway_ip

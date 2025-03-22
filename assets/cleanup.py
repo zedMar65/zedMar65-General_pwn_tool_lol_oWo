@@ -17,8 +17,3 @@ packet = ARP(op=2, pdst=args.target_ip, hwdst=args.target_mac, psrc=args.gateway
 packet1 = ARP(op=2, pdst=args.gateway_ip, hwdst=args.gateway_mac, psrc=args.target_ip, hwsrc=args.target_mac)
 send(packet, count=4, verbose=False)
 send(packet1, count=4, verbose=False)
-
-# Verify the change
-os.system("ipconfig")
-
-input("Press any to exit...")
