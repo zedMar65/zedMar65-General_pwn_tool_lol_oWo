@@ -104,6 +104,9 @@ ProcessInfo StartPythonProcessWithConsole(const string& pythonScriptPath) {
     
     wstring wPythonScriptPath = wstring(pythonScriptPath.begin(), pythonScriptPath.end());
     wstring wCommand = L"python " + wPythonScriptPath;
+
+    printf("Command: %ls\n", wCommand.c_str());
+
     DWORD consoleParams = showConsole ? CREATE_NEW_CONSOLE : CREATE_NO_WINDOW | CREATE_SUSPENDED;
     
     if (!CreateProcessW(
@@ -164,7 +167,7 @@ string findMac(string ip){
     size_t start = result.find("|");
     size_t end = result.rfind("|");
     if (start != string::npos && end != string::npos && start != end) {
-        return result.substr(start + 1, end - start - 2);
+        return result.substr(start + 1, end - start - 1);
     }
     cout << "Failed to get MAC address for IP: " << ip << endl;
     return "";
@@ -313,6 +316,7 @@ bool closeProcess(ProcessInfo *processInfo){
     CloseHandle(processInfo->hThread);
     CloseHandle(processInfo->hReadPipe);
     CloseHandle(processInfo->hProcess);
+    
     return true;
 }
 
@@ -374,14 +378,24 @@ void parseCommand(string commandLine, SeshData *seshData, bool *run){
         seshDataRef.otherProcesses["dns"].push_back(StartPythonProcessWithConsole("./assets/dns.spoofpy --target_ip " + seshDataRef.targetIp + " --target_mac " + seshDataRef.targetMac + " --gateway_ip " + seshDataRef.gatewayIp + " --gateway_mac " + seshDataRef.gatewayMac + " --interface " + seshDataRef.interfaceName + " --log " + log));
     }else if(command == "stop dns"){
         closeProcess(&seshDataRef.otherProcesses["dns"].back());
+        seshDataRef.otherProcesses["dns"].pop_back();
     }else if(command == "start arp"){
         seshDataRef.otherProcesses["arp"].push_back(StartPythonProcessWithConsole("./assets/arpspoof.py --target_ip " + seshDataRef.targetIp + " --target_mac " + seshDataRef.targetMac + " --gateway_ip " + seshDataRef.gatewayIp + " --gateway_mac " + seshDataRef.gatewayMac + " --interface " + seshDataRef.interfaceName + " --log " + log));
     }else if(command == "stop arp"){
         closeProcess(&seshDataRef.otherProcesses["arp"].back());
+        seshDataRef.otherProcesses["arp"].pop_back();
     }else if(command == "start forward"){
         seshDataRef.otherProcesses["forward"].push_back(StartPythonProcessWithConsole("./assets/forward.py --target_ip " + seshDataRef.targetIp + " --target_mac " + seshDataRef.targetMac + " --gateway_ip " + seshDataRef.gatewayIp + " --gateway_mac " + seshDataRef.gatewayMac + " --interface " + seshDataRef.interfaceName + " --log " + log));
     }else if(command == "stop forward"){
         closeProcess(&seshDataRef.otherProcesses["forward"].back());
+        seshDataRef.otherProcesses["forward"].pop_back();
+    }else if (command == "free processes"){
+        for(auto& [key, value] : seshDataRef.otherProcesses){
+            for(int i = 0; i < value.size(); i++){
+                closeProcess(&value[i]);
+            }
+            seshDataRef.otherProcesses[key].clear();
+    }
     }else if (command == "clear"){
         system("cls");
     }else if(command == "cleanup"){
