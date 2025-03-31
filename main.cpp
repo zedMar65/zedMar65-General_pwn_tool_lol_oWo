@@ -6,9 +6,18 @@
 #include <unordered_map>
 #include <algorithm>
 #include <fstream>
+#include <thread>
+#include <atomic>
 #define UNICODE
 
 using namespace std;
+
+
+struct SeshData;
+
+void print(SeshData& seshData, string str){
+    cout << str << endl;
+}
 
 struct ProcessInfo {
     ProcessInfo(HANDLE hProcess, HANDLE hThread, HANDLE hReadPipe)
@@ -18,7 +27,7 @@ struct ProcessInfo {
     HANDLE hReadPipe;
 };
 
-HANDLE StartPythonProcess(const string& pythonScriptPath) {
+ProcessInfo StartPythonProcess(const string& pythonScriptPath) {
     STARTUPINFOW si = { sizeof(STARTUPINFOW) };
     PROCESS_INFORMATION pi;
     SECURITY_ATTRIBUTES sa = { sizeof(SECURITY_ATTRIBUTES), NULL, TRUE };
@@ -26,14 +35,14 @@ HANDLE StartPythonProcess(const string& pythonScriptPath) {
 
     // Create a pipe for the child process's STDOUT.
     if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0)) {
-        return NULL;
+        return {NULL, NULL, NULL};
     }
 
     // Ensure the read handle to the pipe is not inherited.
     if (!SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0)) {
         CloseHandle(hReadPipe);
         CloseHandle(hWritePipe);
-        return NULL;
+        return {NULL, NULL, NULL};
     }
 
     // Set up the STARTUPINFO structure.
@@ -58,84 +67,66 @@ HANDLE StartPythonProcess(const string& pythonScriptPath) {
             &pi)) {
         CloseHandle(hReadPipe);
         CloseHandle(hWritePipe);
-        return NULL;
+        return {NULL, NULL, NULL};
     }
 
     // Close the write end of the pipe in the parent process.
     CloseHandle(hWritePipe);
 
     // Return the handle to the read end of the pipe.
-    return hReadPipe;
+    return {pi.hProcess, pi.hThread, hReadPipe};
 }
 
 ProcessInfo StartPythonProcessWithConsole(const string& pythonScriptPath) {
     STARTUPINFOW si = { sizeof(STARTUPINFOW) };
-    bool showConsole = true;
-    PROCESS_INFORMATION pi = { 0 };
+    PROCESS_INFORMATION pi;
     SECURITY_ATTRIBUTES sa = { sizeof(SECURITY_ATTRIBUTES), NULL, TRUE };
-    HANDLE hReadPipe = NULL, hWritePipe = NULL, hWritePipeDup = NULL;
-    
+    HANDLE hReadPipe, hWritePipe;
+
+    // Create a pipe for the child process's STDOUT.
     if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0)) {
-        return ProcessInfo(NULL, NULL, NULL);
+        return {NULL, NULL, NULL};
     }
-    
+
+    // Ensure the read handle to the pipe is not inherited.
     if (!SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0)) {
         CloseHandle(hReadPipe);
         CloseHandle(hWritePipe);
-        return ProcessInfo(NULL, NULL, NULL);
+        return {NULL, NULL, NULL};
     }
-    
-    if (showConsole) {
-        AllocConsole();
-    
-        if (!DuplicateHandle(GetCurrentProcess(), hWritePipe, GetCurrentProcess(), &hWritePipeDup, 0, TRUE, DUPLICATE_SAME_ACCESS)) {
-            CloseHandle(hReadPipe);
-            CloseHandle(hWritePipe);
-            return ProcessInfo(NULL, NULL, NULL);
-        }
-    
-        SetStdHandle(STD_OUTPUT_HANDLE, hWritePipeDup);
-        SetStdHandle(STD_ERROR_HANDLE, hWritePipeDup);
-    } else {
-        si.dwFlags = STARTF_USESTDHANDLES;
-        si.hStdOutput = hWritePipe;
-        si.hStdError = hWritePipe;
-    }
-    
-    wstring wPythonScriptPath = wstring(pythonScriptPath.begin(), pythonScriptPath.end());
-    wstring wCommand = L"python " + wPythonScriptPath;
 
-    printf("Command: %ls\n", wCommand.c_str());
-
-    DWORD consoleParams = showConsole ? CREATE_NEW_CONSOLE : CREATE_NO_WINDOW | CREATE_SUSPENDED;
+    AllocConsole();
     
+
+    string command = "python " + pythonScriptPath;
+    wstring wCommand(command.begin(), command.end());
+
+    // Create the child process.
+    si.hStdError = hWritePipe;
+    si.dwFlags |= STARTF_USESTDHANDLES;
     if (!CreateProcessW(
             NULL,
             const_cast<wchar_t*>(wCommand.c_str()),
             NULL,
             NULL,
             TRUE,
-            consoleParams,
+            CREATE_NEW_CONSOLE,
             NULL,
             NULL,
             &si,
             &pi)) {
         CloseHandle(hReadPipe);
         CloseHandle(hWritePipe);
-        if (showConsole) CloseHandle(hWritePipeDup);
-        return ProcessInfo(NULL, NULL, NULL);
+        return {NULL, NULL, NULL};
     }
-    DWORD error = GetLastError();
-    
-    if (showConsole) {
-        AttachConsole(pi.dwProcessId);
-    }
-    
-    ResumeThread(pi.hThread);
-    
+
     CloseHandle(hWritePipe);
-    if (showConsole) CloseHandle(hWritePipeDup);
-    
+
+    AttachConsole(pi.dwProcessId);
+    // Close the original read end of the pipe in the parent process.
+    ResumeThread(pi.hThread);
+
+    // Return the handle to the read end of the pipe.
     return ProcessInfo(pi.hProcess, pi.hThread, hReadPipe);
 }
 
@@ -146,31 +137,41 @@ string input(string prompt) {
 }
 
 string findMac(string ip){
-    cout << "Resolving MAC address for IP: " << ip << endl;
     const string pythonScriptPath = "./assets/get_mac.py --target_ip " + ip;
-    HANDLE hReadPipe = StartPythonProcess(pythonScriptPath);
-    if (hReadPipe == NULL) {
-        cout << "Failed to start Python process, while getting mac" << endl;
+    ProcessInfo tempInfo = (StartPythonProcess(pythonScriptPath));
+    if (tempInfo.hReadPipe == NULL) {
         return "";
     }
     string result;
     char buffer[128];
     DWORD bytesRead;
 
-    while (ReadFile(hReadPipe, buffer, sizeof(buffer) - 1, &bytesRead, NULL) && bytesRead > 0) {
+    while (ReadFile(tempInfo.hReadPipe, buffer, sizeof(buffer) - 1, &bytesRead, NULL) && bytesRead > 0) {
         buffer[bytesRead] = '\0';
         result += buffer;
     }
 
-    CloseHandle(hReadPipe);
+    CloseHandle(tempInfo.hReadPipe);
 
     size_t start = result.find("|");
     size_t end = result.rfind("|");
     if (start != string::npos && end != string::npos && start != end) {
         return result.substr(start + 1, end - start - 1);
     }
-    cout << "Failed to get MAC address for IP: " << ip << endl;
     return "";
+}
+
+void inputListener(atomic<bool>& has_input, string& command){
+    while (true) {
+        if (has_input) {
+            this_thread::sleep_for(chrono::milliseconds(100));
+            continue;
+        }
+        string inputLine;
+        inputLine = input("\\\\> ");
+        command = inputLine;
+        has_input = true;
+    }
 }
 
 struct SeshData
@@ -182,26 +183,31 @@ struct SeshData
     string gatewayIp = "";
     string gatewayMac = "";
     string interfaceName = "";
+    string command = "";
+    atomic<bool> has_input = false;
+    thread inputThread;
+    SeshData* seshData = NULL;
+    bool debug = false;
     ProcessInfo serverHandle = { NULL, NULL, NULL };
     unordered_map<string, vector<ProcessInfo>> otherProcesses;
-    void print(){
-        cout << "--------Session Data--------" << endl;
-        cout << "Target IP: " << targetIp << endl;
-        cout << "Target MAC: " << targetMac << endl;
-        cout << "My IP: " << myIp << endl;
-        cout << "My MAC: " << myMac << endl;
-        cout << "Gateway IP: " << gatewayIp << endl;
-        cout << "Gateway MAC: " << gatewayMac << endl;
-        cout << "Interface Name: " << interfaceName << endl;
-        cout << "Server Handle: " << serverHandle.hProcess << endl;
-        cout << "-------Other Processes------" << endl;
+    void printSesh(){
+        print(seshData[0], "--------Session Data--------");
+        print(seshData[0], "Target IP: " + targetIp);
+        print(seshData[0], "Target MAC: " + targetMac);
+        print(seshData[0], "My IP: " + myIp);
+        print(seshData[0], "My MAC: " + myMac);
+        print(seshData[0], "Gateway IP: " + gatewayIp);
+        print(seshData[0], "Gateway MAC: " + gatewayMac);
+        print(seshData[0], "Interface Name: " + interfaceName);
+        print(seshData[0], "Server Handle: " + to_string((uintptr_t)serverHandle.hProcess));
+        print(seshData[0], "-------Other Processes------");
         for(auto& [key, value] : otherProcesses){
-            cout << key << ":" << endl;
+            print(seshData[0], key + ":");
             for(int i = 0; i < value.size(); i++){
-                cout << "    " << i << ": " << value[i].hProcess << endl;
+                print(seshData[0], "    " + to_string(i) + ": " + to_string((uintptr_t)value[i].hProcess));
             }
         }
-        cout << "----------------------------" << endl;
+        print(seshData[0], "----------------------------");
     }
     void parseArgs(int argc, char* argv[]) {
         for (int i = 0; i < argc; i++) {
@@ -220,10 +226,22 @@ struct SeshData
                 gatewayMac = argv[i + 1];
             } else if (arg == "--interface") {
                 interfaceName = argv[i + 1];
+            } else if (arg == "--debug") {
+                debug = true;
+            } else if (arg == "--help") {
+                print(seshData[0], "Options:");
+                print(seshData[0], "  --target-ip <ip>");
+                print(seshData[0], "  --target-mac <mac>");
+                print(seshData[0], "  --my-ip <ip>");
+                print(seshData[0], "  --my-mac <mac>");
+                print(seshData[0], "  --gateway-ip <ip>");
+                print(seshData[0], "  --gateway-mac <mac>");
+                print(seshData[0], "  --interface <name>");
+                print(seshData[0], "  --debug");
             }
         }
         fillInMissingData();
-        print();
+        printSesh();
     }
     void fillInMissingData(){
         if (targetIp == "") {
@@ -260,13 +278,16 @@ struct SeshData
     }
 };
 
-SeshData getSeshData(){
+SeshData* getSeshData(){
     int argc;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (argv == NULL) {
-        return SeshData();
+        SeshData seshData = SeshData();
+        seshData.seshData = &seshData;
+        return &seshData;
     }
-    SeshData seshData;
+    static SeshData seshData;
+    seshData.seshData = &seshData;
     vector<string> narrowArgs;
     for (int i = 0; i < argc; i++) {
         wstring wideArg = argv[i];
@@ -277,7 +298,8 @@ SeshData getSeshData(){
         cArgs.push_back(&arg[0]);
     }
     seshData.parseArgs(argc, cArgs.data());
-    return seshData;
+    seshData.inputThread = thread(inputListener, ref(seshData.has_input), ref(seshData.command));
+    return &seshData;
 }
 
 int InitConsole(){
@@ -296,21 +318,32 @@ int InitConsole(){
 
 bool startServer(SeshData *seshData){
     seshData->serverHandle = { NULL, NULL, NULL };
-    ProcessInfo tempSer = StartPythonProcessWithConsole("./assets/server.py");
-    seshData->serverHandle = tempSer;
+    seshData->serverHandle = StartPythonProcessWithConsole("./assets/server.py");
     if (seshData->serverHandle.hProcess == NULL) {
-        cout << "Failed to start server. Error" << GetLastError() << endl;
+        print(seshData[0], "Failed to start server. Error: "+GetLastError());
         return false;
     }
-    cout << "Server started successfully." << endl;
+
+    string result;
+    char buffer[128];
+    DWORD bytesRead;
+    string lineBuffer;
     return true;
 }
 
-bool closeProcess(ProcessInfo *processInfo){
+bool closeProcess(SeshData *seshData, ProcessInfo *processInfo){
+    DWORD exitCode;
+    if ((GetExitCodeProcess(processInfo->hProcess, &exitCode) && exitCode != STILL_ACTIVE) || processInfo->hProcess == NULL || WaitForSingleObject(processInfo->hProcess, 0) == WAIT_OBJECT_0){
+        if (seshData->debug) {
+            print(seshData[0], "Process already exited.");
+        }
+        return true;
+    }
+    print(seshData[0], "OK");
     if (TerminateProcess(processInfo->hProcess, 0)) {
-        cout << "Terminated process successfully." << endl;
+        print(seshData[0], "Terminated process successfully.");
     } else {
-        cout << "Failed to terminate process. Error: " << GetLastError() << endl;
+        print(seshData[0], "Failed to terminate process. Error: "+GetLastError());
         return false;
     }
     CloseHandle(processInfo->hThread);
@@ -321,17 +354,20 @@ bool closeProcess(ProcessInfo *processInfo){
 }
 
 bool cleanup(SeshData *seshData){
-    HANDLE proc = StartPythonProcess("./assets/cleanup.py --interface " + seshData->interfaceName+" --target_ip "+seshData->targetIp+" --target_mac "+seshData->targetMac+" --gateway_ip "+seshData->gatewayIp+" --gateway_mac "+seshData->gatewayMac);
+    HANDLE proc = StartPythonProcess("./assets/cleanup.py --interface " + seshData->interfaceName+" --target_ip "+seshData->targetIp+" --target_mac "+seshData->targetMac+" --gateway_ip "+seshData->gatewayIp+" --gateway_mac "+seshData->gatewayMac).hProcess;
     if (proc == NULL) {
-        cout << "Failed to start cleanup process." << endl;
+        print(seshData[0], "Failed to start cleanup process.");
         return false;
     }
-    cout << "Cleanup process started successfully." << endl;
+    print(seshData[0], "Cleanup process started successfully.");
     WaitForSingleObject(proc, 5000);
     CloseHandle(proc);
 }
 
 void parseCommand(string commandLine, SeshData *seshData, bool *run){
+    if (seshData->debug) {
+        print(seshData[0], "Debug: Parsing command: "+commandLine+"\n");
+    }
     string tempCom = "";
     commandLine += (char)00;
     vector<string> flags;
@@ -368,31 +404,52 @@ void parseCommand(string commandLine, SeshData *seshData, bool *run){
     
     if (command == "exit") {
         *run = false;
-    }else if(command == "stop server"){
-        closeProcess(&seshDataRef.serverHandle);
+    }else if (command == "debug"){
+        if (seshDataRef.debug) {
+            seshDataRef.debug = false;
+            print(seshData[0], "Debug mode disabled.");
+        } else {
+            seshDataRef.debug = true;
+            print(seshData[0], "Debug mode enabled.");
+        }
+    }
+    else if(command == "stop server"){
+        closeProcess(seshData, &seshDataRef.serverHandle);
     }else if(command == "start server"){
         startServer(seshData);
     }else if(command == "print"){
-        seshDataRef.print();
+        seshDataRef.printSesh();
     }else if(command == "start dns"){
-        seshDataRef.otherProcesses["dns"].push_back(StartPythonProcessWithConsole("./assets/dns.spoofpy --target_ip " + seshDataRef.targetIp + " --target_mac " + seshDataRef.targetMac + " --gateway_ip " + seshDataRef.gatewayIp + " --gateway_mac " + seshDataRef.gatewayMac + " --interface " + seshDataRef.interfaceName + " --log " + log));
+        seshDataRef.otherProcesses["dns"].push_back(StartPythonProcessWithConsole("./assets/dnsspoof.py --target_ip " + seshDataRef.targetIp + " --target_mac " + seshDataRef.targetMac + " --gateway_ip " + seshDataRef.gatewayIp + " --gateway_mac " + seshDataRef.gatewayMac + " --interface " + seshDataRef.interfaceName + " --log " + log));
     }else if(command == "stop dns"){
-        closeProcess(&seshDataRef.otherProcesses["dns"].back());
+        if (seshDataRef.otherProcesses["dns"].empty()){
+            print(seshData[0], "No DNS process to stop.");
+            return;
+        }
+        closeProcess(seshData, &seshDataRef.otherProcesses["dns"].back());
         seshDataRef.otherProcesses["dns"].pop_back();
     }else if(command == "start arp"){
         seshDataRef.otherProcesses["arp"].push_back(StartPythonProcessWithConsole("./assets/arpspoof.py --target_ip " + seshDataRef.targetIp + " --target_mac " + seshDataRef.targetMac + " --gateway_ip " + seshDataRef.gatewayIp + " --gateway_mac " + seshDataRef.gatewayMac + " --interface " + seshDataRef.interfaceName + " --log " + log));
     }else if(command == "stop arp"){
-        closeProcess(&seshDataRef.otherProcesses["arp"].back());
+        if (seshDataRef.otherProcesses["arp"].empty()){
+            print(seshData[0], "No ARP process to stop.");
+            return;
+        }
+        closeProcess(seshData, &seshDataRef.otherProcesses["arp"].back());
         seshDataRef.otherProcesses["arp"].pop_back();
     }else if(command == "start forward"){
         seshDataRef.otherProcesses["forward"].push_back(StartPythonProcessWithConsole("./assets/forward.py --target_ip " + seshDataRef.targetIp + " --target_mac " + seshDataRef.targetMac + " --gateway_ip " + seshDataRef.gatewayIp + " --gateway_mac " + seshDataRef.gatewayMac + " --interface " + seshDataRef.interfaceName + " --log " + log));
     }else if(command == "stop forward"){
-        closeProcess(&seshDataRef.otherProcesses["forward"].back());
+        if (seshDataRef.otherProcesses["forward"].empty()){
+            print(seshData[0], "No forward process to stop.");
+            return;
+        }
+        closeProcess(seshData, &seshDataRef.otherProcesses["forward"].back());
         seshDataRef.otherProcesses["forward"].pop_back();
     }else if (command == "free processes"){
         for(auto& [key, value] : seshDataRef.otherProcesses){
             for(int i = 0; i < value.size(); i++){
-                closeProcess(&value[i]);
+                closeProcess(seshData, &value[i]);
             }
             seshDataRef.otherProcesses[key].clear();
     }
@@ -405,7 +462,7 @@ void parseCommand(string commandLine, SeshData *seshData, bool *run){
         if (logFile.is_open()){
             string line;
             while (getline(logFile, line)){
-                cout << line << endl;
+                print(seshData[0], line);
             }
             logFile.close();
         }
@@ -413,47 +470,116 @@ void parseCommand(string commandLine, SeshData *seshData, bool *run){
         seshDataRef.fillInMissingData();
     }else if (command == "find mac"){
         string ip = input("Enter the IP to find the MAC address for: ");
-        cout << "MAC address for IP: " << ip << " is: " << findMac(ip) << endl;
+        print(seshData[0], "MAC address for IP: " + ip +" is: " + findMac(ip));
     }else if (command == "reset vars"){
         for(auto& [key, value] : seshDataRef.otherProcesses){
             for(int i = 0; i < value.size(); i++){
-                closeProcess(&value[i]);
+                closeProcess(seshData, &value[i]);
             }
         }
-        seshDataRef = SeshData();
+        seshDataRef.otherProcesses.clear();
+        seshDataRef.targetIp = "";
+        seshDataRef.targetMac = "";
+        seshDataRef.myIp = "";
+        seshDataRef.myMac = "";
+        seshDataRef.gatewayIp = "";
+        seshDataRef.gatewayMac = "";
+        seshDataRef.interfaceName = "";
     }else if(command == "help"){
-        cout << "Commands:" << endl;
-        cout << "    exit" << endl;
-        cout << "    stop server" << endl;
-        cout << "    start server" << endl;
-        cout << "    print" << endl;
-        cout << "    start dns" << endl;
-        cout << "    stop dns" << endl;
-        cout << "    start arp" << endl;
-        cout << "    stop arp" << endl;
-        cout << "    start forward" << endl;
-        cout << "    stop forward" << endl;
-        cout << "    help" << endl;
+        print(seshData[0], "Commands:");
+        print(seshData[0], "  exit");
+        print(seshData[0], "  debug");
+        print(seshData[0], "  start server");
+        print(seshData[0], "  stop server");
+        print(seshData[0], "  start dns");
+        print(seshData[0], "  stop dns");
+        print(seshData[0], "  start arp");
+        print(seshData[0], "  stop arp");
+        print(seshData[0], "  start forward");
+        print(seshData[0], "  stop forward");
+        print(seshData[0], "  cleanup");
+        print(seshData[0], "  clear");
+        print(seshData[0], "  print");
+        print(seshData[0], "  find mac");
+        print(seshData[0], "  set vars");
+        print(seshData[0], "  reset vars");
+        print(seshData[0], "  log");
+        print(seshData[0], "  free processes");
+        print(seshData[0], "  help");
+        print(seshData[0], "  exit");
+        print(seshData[0], "  debug");
     }
     else{
-        cout << "Unknown command: [" << command << "]" << endl;
+        print(seshData[0], "Unknown command: [" + command + "]");
     }
 }
 
 int mainLoop(SeshData *seshData, bool *run){
-    string command = input("\\\\> ");
-    parseCommand(command, seshData, run);
+    seshData->has_input = true;
+    if (seshData->has_input && seshData->command != "") {
+        parseCommand(seshData->command, seshData, run);
+        seshData->command = "";
+    }
     
     
+    for(auto& [key, value] : seshData->otherProcesses){
+        for(int j = 0; j  < seshData->otherProcesses[key].size(); j++){
+            DWORD exitCode;
+            if ((GetExitCodeProcess(seshData->otherProcesses[key][j].hProcess, &exitCode) && exitCode != STILL_ACTIVE) || seshData->otherProcesses[key][j].hProcess == NULL || WaitForSingleObject(seshData->otherProcesses[key][j].hProcess, 0) == WAIT_OBJECT_0){
+                print(seshData[0], "\nProcess " + key + "-" + to_string(j) + " exited.");
+                closeProcess(seshData, &seshData->otherProcesses[key][j]);
+                seshData->otherProcesses[key].erase(seshData->otherProcesses[key].begin() + j);
+                j--;
+                continue;
+            }
+            if (seshData->otherProcesses[key].empty()){
+                seshData->otherProcesses.erase(key);
+            }
+            if (seshData->debug) {
+                char ch;
+                DWORD bytesRead;
+                std::string line;
+                if (seshData->debug) {
+                    print(seshData[0], "Debug: Reading from process " + key + "-" + to_string(j) + ": " + to_string((uintptr_t)seshData->otherProcesses[key][j].hReadPipe));
+                }
+                if (seshData->otherProcesses[key][j].hReadPipe == NULL) {
+                    print(seshData[0], "Debug: Read pipe is NULL for process " + key + "-" + to_string(j));
+                    continue;
+                }
+                while (ReadFile(seshData->otherProcesses[key][j].hReadPipe, &ch, 1, &bytesRead, NULL) && bytesRead > 0) {
+                    if (ch == '\0' || ((GetExitCodeProcess(seshData->otherProcesses[key][j].hProcess, &exitCode) && exitCode != STILL_ACTIVE) || seshData->otherProcesses[key][j].hProcess == NULL || WaitForSingleObject(seshData->otherProcesses[key][j].hProcess, 0) == WAIT_OBJECT_0)){
+                        break;
+                    }
+                    if (ch == '\n') { // End of line detected
+                        print(seshData[0], key +"-" + to_string(j) + ": " + line);
+                        line.clear(); // Reset for the next line
+                    } else {
+                        line += ch;
+                    }
+                }
+                if (!line.empty()) {
+                    print(seshData[0], key +"-"+ to_string(j) + ": "+ line);
+                }
+            }
+
+            
+            
+        }
+    }
+    seshData->has_input = false;
+    
+
     return 0;
 }
 
-void exit(SeshData seshData){
-    input("Press ant key to exit...");
-    closeProcess(&seshData.serverHandle);
+void exitMain(SeshData &seshData){
+    input("Press ant key to exit...\n");
+    seshData.inputThread.detach();
+    cleanup(&seshData);
+    closeProcess(&seshData, &seshData.serverHandle);
     for(auto& [key, value] : seshData.otherProcesses){
         for(int i = 0; i < value.size(); i++){
-            closeProcess(&value[i]);
+            closeProcess(&seshData, &value[i]);
         }
     }
     FreeConsole();
@@ -463,17 +589,17 @@ void exit(SeshData seshData){
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     bool run = true;
     if (InitConsole() == -1) {
-        exit(SeshData());
+        exitMain(SeshData());
     }
 
-    SeshData seshData = getSeshData();
+    SeshData* seshData = getSeshData();
 
     while (run) {
-        mainLoop(&seshData, &run);
+        mainLoop(seshData, &run);
         Sleep(0.1);
     }
     
-    exit(seshData);
+    exitMain(seshData[0]);
 
     return 0;
 }
