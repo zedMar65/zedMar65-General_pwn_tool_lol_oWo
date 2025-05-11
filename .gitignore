@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 .vscode
 *.log
 *.exe
@@ -7,3 +8,17 @@
 index.html
 build/
 node_modules/
+=======
+# Ignore vcpkg build outputs (but not the submodule itself)
+external/vcpkg/vcpkg*
+external/vcpkg/buildtrees/
+external/vcpkg/packages/
+external/vcpkg/installed/
+external/vcpkg/downloads/
+build/
+CMakeCache.txt
+cmake_install.cmake
+CMakeFiles/
+vcpkg_installed/
+external/
+>>>>>>> patched
