@@ -1,1 +1,28 @@
+<<<<<<< HEAD
 build/
+=======
+<<<<<<< HEAD
+.vscode
+*.log
+*.exe
+*.dll
+*.obj
+*.o
+index.html
+build/
+node_modules/
+=======
+# Ignore vcpkg build outputs (but not the submodule itself)
+external/vcpkg/vcpkg*
+external/vcpkg/buildtrees/
+external/vcpkg/packages/
+external/vcpkg/installed/
+external/vcpkg/downloads/
+build/
+CMakeCache.txt
+cmake_install.cmake
+CMakeFiles/
+vcpkg_installed/
+external/
+>>>>>>> patched
+>>>>>>> e34ea514060ee0202d76fdf2d088a231f8762f36
