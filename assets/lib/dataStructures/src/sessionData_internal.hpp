@@ -1,8 +1,8 @@
 #pragma once
 #include "main.hpp"
 #include "pythonProcess.hpp"
-#include <memory>
 #include <string>
+#include <vector>
 #include <unordered_map>
 
 
@@ -29,12 +29,17 @@ public:
 
 	int startProcess(string _name, args_t _args) {
 		int _id = processes.size();
-		processes.push_back(get_process(_name, _args, _id));
+		processes.push_back(start_process(_name, _args, _id));
 		return _id;
 	}
 
 	pythonProcessData* getProcess(int _id){
 		return processes[_id].get();
+	}
+
+	void eraseProcess(int _id){
+		processes.erase(processes.begin()+_id);
+		return;
 	}
 
 	vector<string> getAllKeys(){

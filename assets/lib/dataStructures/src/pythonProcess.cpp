@@ -20,7 +20,7 @@ void asign_id(pythonProcessData &process, int _id){
     return;
 }
 
-void stop_process(pythonProcessData &process){
+void stop_process_i(pythonProcessData &process){
     process.run = false;
     if (process.t.joinable()) {
         process.t.join();
@@ -40,6 +40,11 @@ bool is_alive(pythonProcessData &process){
     return process.run;
 }
 
-unique_ptr<pythonProcessData> get_process(string _name, args_t _args, int _id){
+string get_name(pythonProcessData &process){
+    return process.name;
+}
+
+
+unique_ptr<pythonProcessData> start_process(string _name, args_t _args, int _id){
     return make_unique<pythonProcessData>(_name, _args, _id);
 }
