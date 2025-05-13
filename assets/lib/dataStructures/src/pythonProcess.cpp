@@ -1,5 +1,6 @@
 #include "pythonProcess_internal.hpp"
-#include "pythonProcess.hpp"
+#include <Python.h>
+#include "main.hpp"
 
 using namespace std;
 
@@ -44,7 +45,9 @@ string get_name(pythonProcessData &process){
     return process.name;
 }
 
-
 unique_ptr<pythonProcessData> start_process(string _name, args_t _args, int _id){
     return make_unique<pythonProcessData>(_name, _args, _id);
+}
+
+void run_code(pythonProcessData &process, bool _await){
 }

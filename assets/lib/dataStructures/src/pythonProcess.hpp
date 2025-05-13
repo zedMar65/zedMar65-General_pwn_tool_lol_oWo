@@ -12,3 +12,5 @@ void asign_id(pythonProcessData &process, int _id);
 bool is_alive(pythonProcessData &process);
 std::string get_name(pythonProcessData &process);
 std::unique_ptr<pythonProcessData> start_process(std::string _name, args_t _args, int _id);
+void set_code(pythonProcessData &process, string _code_type);
+void run_code(pythonProcessData &process, bool _await);

@@ -1,4 +1,7 @@
 #include "sessionData.hpp"
+#include "main.hpp"
+#include "pythonProcess.hpp"
+#include "pythonProcess_internal.hpp"
 #include "sessionData_internal.hpp"
 #include "ui.hpp"
 #include <memory>
@@ -73,8 +76,24 @@ pythonProcessData* Session::get_process(string _id_str){
     return seshData->getProcess(_id);
 }
 
-int Session::new_process(string _name, args_t _args){
-    return seshData->startProcess(find_arg(_name), _args);
+int Session::new_process(string _name, args_t _args, string _code_type, bool _await = false){
+    int _id = seshData->startProcess(find_arg(_name), _args);
+    pythonProcessData& process = *get_process(_id);
+    code_info code = get_code(_code_type);
+    for(int i = 0; i < code.first.size(); i++){
+        code.second = code.first[i].first + "=" + find_arg(get_const(code.first[i].second)) + "\n" + code.second;
+    }
+    code.second = get_code("STD_REDIRECT").second + code.second;
+    run_code(process, _await);
+    return _id;
+}
+
+void Session::run_process(int _id, bool _await = false){
+    run_code(*get_process(_id), _await);
+}
+
+void Session::run_process(string _id_str, bool _await = false){
+    run_code(*get_process(_id_str), _await);
 }
 
 void Session::stop_process(int _id){
