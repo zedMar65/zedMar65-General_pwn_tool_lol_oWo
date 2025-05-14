@@ -1,9 +1,2 @@
-.vscode
-*.log
-*.exe
-*.dll
-*.obj
-*.o
-index.html
+.cache/
 build/
-node_modules/
